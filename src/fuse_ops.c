@@ -14,6 +14,7 @@
 #include "merkle.h"
 #include "storage.h"
 #include "wal.h"
+#include "network.h"
 
 static int path_split(const char *path,
                       uint32_t *parent_id,
@@ -51,7 +52,8 @@ static int chainfs_getattr(const char *path,
         return -ENOENT;
     chainfs_inode_t inode;
     if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+                               parent_id,
+                               &inode) != 0)
         return -ENOENT;
 
     switch (inode.type) {
@@ -62,9 +64,10 @@ static int chainfs_getattr(const char *path,
         case INODE_SYMLINK:
             st->st_mode  = S_IFLNK | 0777;
             st->st_nlink = 1;
-            st->st_size  = strlen(inode.symlink_target);
+            st->st_size  =
+                strlen(inode.symlink_target);
             break;
-        default: /* INODE_FILE */
+        default:
             st->st_mode  = S_IFREG | 0644;
             st->st_nlink = inode.nlink;
             st->st_size  = inode.size;
@@ -78,7 +81,8 @@ static int chainfs_getattr(const char *path,
     return 0;
 }
 
-static int chainfs_readdir(const char *path, void *buf,
+static int chainfs_readdir(const char *path,
+                           void *buf,
                            fuse_fill_dir_t filler,
                            off_t offset,
                            struct fuse_file_info *fi) {
@@ -88,7 +92,8 @@ static int chainfs_readdir(const char *path, void *buf,
     uint32_t parent_id = 0;
     if (strcmp(path, "/") != 0) {
         chainfs_inode_t dir;
-        if (inode_find_dir_by_path(path, &dir) != 0)
+        if (inode_find_dir_by_path(path,
+                                    &dir) != 0)
             return -ENOENT;
         parent_id = dir.inode_id;
     }
@@ -110,8 +115,7 @@ static int chainfs_mkdir(const char *path,
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t existing;
-    if (inode_find_by_name_in(name,
-                               parent_id,
+    if (inode_find_by_name_in(name, parent_id,
                                &existing) == 0)
         return -EEXIST;
     chainfs_inode_t inode;
@@ -120,24 +124,26 @@ static int chainfs_mkdir(const char *path,
     inode.parent_id = parent_id;
     inode.type      = INODE_DIR;
     inode.nlink     = 2;
-    strncpy(inode.name, name, CHAINFS_MAX_NAME - 1);
+    strncpy(inode.name, name,
+            CHAINFS_MAX_NAME - 1);
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     inode.atime = inode.mtime = inode.ctime = ts;
     inode_write(&inode);
-    htable_insert(inode.name,
-                  inode.parent_id,
+    htable_insert(inode.name, inode.parent_id,
                   inode.inode_id);
     state_save();
     return 0;
-}static int chainfs_rmdir(const char *path) {
+}
+
+static int chainfs_rmdir(const char *path) {
     uint32_t parent_id;
     char name[CHAINFS_MAX_NAME];
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
     if (inode.type != INODE_DIR) return -ENOTDIR;
     htable_delete(inode.name, inode.parent_id);
@@ -155,8 +161,7 @@ static int chainfs_create(const char *path,
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t existing;
-    if (inode_find_by_name_in(name,
-                               parent_id,
+    if (inode_find_by_name_in(name, parent_id,
                                &existing) == 0)
         return -EEXIST;
     chainfs_inode_t inode;
@@ -166,13 +171,13 @@ static int chainfs_create(const char *path,
     inode.type      = INODE_FILE;
     inode.nlink     = 1;
     inode.size      = 0;
-    strncpy(inode.name, name, CHAINFS_MAX_NAME - 1);
+    strncpy(inode.name, name,
+            CHAINFS_MAX_NAME - 1);
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     inode.atime = inode.mtime = inode.ctime = ts;
     inode_write(&inode);
-    htable_insert(inode.name,
-                  inode.parent_id,
+    htable_insert(inode.name, inode.parent_id,
                   inode.inode_id);
     state_save();
     return 0;
@@ -187,11 +192,13 @@ static int chainfs_open(const char *path,
         return -ENOENT;
     chainfs_inode_t inode;
     return inode_find_by_name_in(name,
-                                  parent_id, &inode);
+                                  parent_id,
+                                  &inode);
 }
 
-static int chainfs_read(const char *path, char *buf,
-                        size_t size, off_t offset,
+static int chainfs_read(const char *path,
+                        char *buf, size_t size,
+                        off_t offset,
                         struct fuse_file_info *fi) {
     (void) fi;
     uint32_t parent_id;
@@ -199,26 +206,28 @@ static int chainfs_read(const char *path, char *buf,
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
     size_t total = 0;
     uint8_t block_data[CHAINFS_BLOCK_SIZE];
     for (uint32_t i = 0;
-         i < inode.block_count && total < size; i++) {
+         i < inode.block_count && total < size;
+         i++) {
         uint32_t bsize = 0;
         if (block_read(inode.block_ids[i],
-                       block_data, &bsize) != 0) break;
+                       block_data, &bsize) != 0)
+            break;
         off_t block_start = i * CHAINFS_BLOCK_SIZE;
         off_t block_end   = block_start + bsize;
         if (offset >= block_end) continue;
-        off_t  start    = (offset > block_start) ?
-                          offset - block_start : 0;
+        off_t start = (offset > block_start) ?
+                      offset - block_start : 0;
         size_t can_read = bsize - start;
         if (can_read > size - total)
             can_read = size - total;
-        memcpy(buf + total, block_data + start,
-               can_read);
+        memcpy(buf + total,
+               block_data + start, can_read);
         total += can_read;
     }
     return (int)total;
@@ -234,27 +243,37 @@ static int chainfs_write(const char *path,
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
     size_t written = 0;
     while (written < size) {
-        uint32_t block_id = fs_state->next_block_id++;
+        uint32_t block_id =
+            fs_state->next_block_id++;
         size_t chunk = size - written;
         if (chunk > CHAINFS_BLOCK_SIZE)
             chunk = CHAINFS_BLOCK_SIZE;
         const uint8_t *data =
             (const uint8_t*)buf + written;
         wal_write(block_id, data, chunk);
-        if (block_write(block_id, data, chunk) != 0)
+        if (block_write(block_id,
+                        data, chunk) != 0)
             return -EIO;
         wal_commit(block_id);
-        inode.block_ids[inode.block_count++] = block_id;
+
+        /* P2P replication */
+        if (net_state &&
+            net_state->peer_count > 0)
+            net_block_replicate(block_id,
+                                data, chunk);
+
+        inode.block_ids[inode.block_count++] =
+            block_id;
         written += chunk;
     }
     inode.size += size;
     merkle_compute(&inode, inode.root_hash);
-    printf("[chainfs] write %s — root_hash: ",
+    printf("[chainfs] write %s — root: ",
            inode.name);
     hash_print(inode.root_hash);
     printf("\n");
@@ -267,105 +286,87 @@ static int chainfs_write(const char *path,
     return (int)size;
 }
 
-
 static int chainfs_symlink(const char *target,
                            const char *path) {
     uint32_t parent_id;
     char name[CHAINFS_MAX_NAME];
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
-
     chainfs_inode_t existing;
-    if (inode_find_by_name_in(name,
-                               parent_id,
+    if (inode_find_by_name_in(name, parent_id,
                                &existing) == 0)
         return -EEXIST;
-
     chainfs_inode_t inode;
     memset(&inode, 0, sizeof(inode));
     inode.inode_id  = fs_state->next_inode_id++;
     inode.parent_id = parent_id;
     inode.type      = INODE_SYMLINK;
     inode.nlink     = 1;
-    strncpy(inode.name, name, CHAINFS_MAX_NAME - 1);
+    strncpy(inode.name, name,
+            CHAINFS_MAX_NAME - 1);
     strncpy(inode.symlink_target, target,
             CHAINFS_MAX_PATH - 1);
-
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     inode.atime = inode.mtime = inode.ctime = ts;
-
     inode_write(&inode);
-    htable_insert(inode.name,
-                  inode.parent_id,
+    htable_insert(inode.name, inode.parent_id,
                   inode.inode_id);
     state_save();
     return 0;
 }
 
 static int chainfs_readlink(const char *path,
-                            char *buf, size_t size) {
+                            char *buf,
+                            size_t size) {
     uint32_t parent_id;
     char name[CHAINFS_MAX_NAME];
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
-
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
-
     if (inode.type != INODE_SYMLINK)
         return -EINVAL;
-
-    strncpy(buf, inode.symlink_target, size - 1);
+    strncpy(buf, inode.symlink_target,
+            size - 1);
     buf[size - 1] = '\0';
     return 0;
 }
 
-
 static int chainfs_link(const char *oldpath,
                         const char *newpath) {
-    
     uint32_t old_parent;
     char old_name[CHAINFS_MAX_NAME];
     if (path_split(oldpath, &old_parent,
                    old_name) != 0)
         return -ENOENT;
-
     chainfs_inode_t inode;
     if (inode_find_by_name_in(old_name,
-                               old_parent, &inode) != 0)
+                               old_parent,
+                               &inode) != 0)
         return -ENOENT;
-
     if (inode.type == INODE_DIR)
-        return -EPERM; 
-
-    
+        return -EPERM;
     uint32_t new_parent;
     char new_name[CHAINFS_MAX_NAME];
     if (path_split(newpath, &new_parent,
                    new_name) != 0)
         return -ENOENT;
-
     chainfs_inode_t existing;
     if (inode_find_by_name_in(new_name,
                                new_parent,
                                &existing) == 0)
         return -EEXIST;
-
-   
     chainfs_inode_t link_inode = inode;
-    link_inode.inode_id  = fs_state->next_inode_id++;
+    link_inode.inode_id  =
+        fs_state->next_inode_id++;
     link_inode.parent_id = new_parent;
     strncpy(link_inode.name, new_name,
             CHAINFS_MAX_NAME - 1);
-
-    
     inode.nlink++;
     inode_write(&inode);
-
-   
     inode_write(&link_inode);
     htable_insert(link_inode.name,
                   link_inode.parent_id,
@@ -375,7 +376,8 @@ static int chainfs_link(const char *oldpath,
 }
 
 static int chainfs_rename(const char *oldpath,
-                          const char *newpath) {uint32_t old_parent;
+                          const char *newpath) {
+    uint32_t old_parent;
     char old_name[CHAINFS_MAX_NAME];
     if (path_split(oldpath, &old_parent,
                    old_name) != 0)
@@ -387,7 +389,8 @@ static int chainfs_rename(const char *oldpath,
         return -ENOENT;
     chainfs_inode_t inode;
     if (inode_find_by_name_in(old_name,
-                               old_parent, &inode) != 0)
+                               old_parent,
+                               &inode) != 0)
         return -ENOENT;
     htable_delete(inode.name, inode.parent_id);
     strncpy(inode.name, new_name,
@@ -397,8 +400,7 @@ static int chainfs_rename(const char *oldpath,
     clock_gettime(CLOCK_REALTIME, &ts);
     inode.ctime = ts;
     inode_write(&inode);
-    htable_insert(inode.name,
-                  inode.parent_id,
+    htable_insert(inode.name, inode.parent_id,
                   inode.inode_id);
     state_save();
     return 0;
@@ -410,22 +412,20 @@ static int chainfs_unlink(const char *path) {
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
-
-    
     if (inode.nlink > 1) {
         inode.nlink--;
         inode_write(&inode);
-        htable_delete(inode.name, inode.parent_id);
+        htable_delete(inode.name,
+                      inode.parent_id);
         inode_delete(inode.inode_id);
         state_save();
         return 0;
     }
-
-   
-    for (uint32_t i = 0; i < inode.block_count; i++)
+    for (uint32_t i = 0;
+         i < inode.block_count; i++)
         block_delete(inode.block_ids[i]);
     htable_delete(inode.name, inode.parent_id);
     inode_delete(inode.inode_id);
@@ -441,29 +441,32 @@ static int chainfs_truncate(const char *path,
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
-    for (uint32_t i = 0; i < inode.block_count; i++)
+    for (uint32_t i = 0;
+         i < inode.block_count; i++)
         block_delete(inode.block_ids[i]);
     inode.block_count = 0;
     inode.size        = 0;
-    memset(inode.root_hash, 0, CHAINFS_HASH_SIZE);
+    memset(inode.root_hash, 0,
+           CHAINFS_HASH_SIZE);
     inode_write(&inode);
     state_save();
     return 0;
 }
 
 static int chainfs_utimens(const char *path,
-                           const struct timespec tv[2]) {
+                           const struct timespec
+                           tv[2]) {
     if (strcmp(path, "/") == 0) return 0;
     uint32_t parent_id;
     char name[CHAINFS_MAX_NAME];
     if (path_split(path, &parent_id, name) != 0)
         return -ENOENT;
     chainfs_inode_t inode;
-    if (inode_find_by_name_in(name,
-                               parent_id, &inode) != 0)
+    if (inode_find_by_name_in(name, parent_id,
+                               &inode) != 0)
         return -ENOENT;
     inode.atime = tv[0];
     inode.mtime = tv[1];
@@ -506,7 +509,7 @@ struct fuse_operations chainfs_ops = {
     .statfs   = chainfs_statfs,
     .chmod    = chainfs_chmod,
     .chown    = chainfs_chown,
-    .symlink  = chainfs_symlink,   
-    .readlink = chainfs_readlink,  
-    .link     = chainfs_link,      
+    .symlink  = chainfs_symlink,
+    .readlink = chainfs_readlink,
+    .link     = chainfs_link,
 };

@@ -11,6 +11,7 @@
 #include "wal.h"
 #include "block_mgr.h"
 #include "crypto.h"
+#include "network.h"
 
 chainfs_state_t *fs_state;
 
@@ -20,7 +21,8 @@ static void get_password(char *buf, size_t len) {
     new = old;
     new.c_lflag &= ~ECHO;
     tcsetattr(0, TCSANOW, &new);
-    printf("Enter encryption password (or Enter to skip): ");
+    printf("Enter encryption password"
+           " (or Enter to skip): ");
     fflush(stdout);
     fgets(buf, len, stdin);
     buf[strcspn(buf, "\n")] = 0;
@@ -31,8 +33,8 @@ static void get_password(char *buf, size_t len) {
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr,
-                "Usage: %s <storage_dir> <mountpoint>\n",
-                argv[0]);
+                "Usage: %s <storage_dir>"
+                " <mountpoint>\n", argv[0]);
         return 1;
     }
 
@@ -54,13 +56,12 @@ int main(int argc, char *argv[]) {
         uint8_t derived_key[32];
         crypto_derive_key(password, derived_key);
 
-        if (memcmp(derived_key, fs_state->enc_key,
-                   32) != 0) {
+        if (memcmp(derived_key,
+                   fs_state->enc_key, 32) != 0) {
             fprintf(stderr,
                     "[chainfs] Wrong password!\n");
             return 1;
         }
-
         fs_state->encrypted = 1;
         printf("[chainfs] Encryption: ON\n");
     } else {
@@ -82,6 +83,15 @@ int main(int argc, char *argv[]) {
 
     htable_init();
 
+   
+    net_server_start(CHAINFS_PORT);
+
+    char peers_config[512];
+    snprintf(peers_config, sizeof(peers_config),
+             "%s/peers.conf",
+             fs_state->storage_path);
+    net_load_peers(peers_config);
+
     char *fuse_argv[] = {
         argv[0], argv[2], "-f", "-s", NULL
     };
@@ -89,5 +99,6 @@ int main(int argc, char *argv[]) {
            fs_state->storage_path);
     printf("[chainfs] mount   : %s\n", argv[2]);
 
-    return fuse_main(4, fuse_argv, &chainfs_ops, NULL);
+    return fuse_main(4, fuse_argv,
+                     &chainfs_ops, NULL);
 }
