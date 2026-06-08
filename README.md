@@ -154,8 +154,8 @@ sudo pacman -S fuse2 openssl pkg-config base-devel
 
 ### Build Instructions
 ```bash
-git clone https://github.com/MohammedBakr1/chainfs
-cd chainfs
+git clone https://github.com/MohammedBakr1/ChainFS
+cd ChainFS
 make
 ```
 
